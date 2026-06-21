@@ -22,6 +22,7 @@ namespace BYOVDMonitor
         public int RescanIntervalMinutes { get; set; }
         public bool MhrEnabled { get; set; }     // проверять новые файлы в Team Cymru MHR (DNS)
         public string WebhookUrl { get; set; }   // адрес для отправки оповещений в SIEM (HTTP POST JSON); пусто = выкл
+        public int FullRescanIntervalHours { get; set; } // 0 = выключен; иначе раз в N часов глубокий обход с пересчётом всех хешей (игнорирует baseline)
 
         public AppConfig()
         {
@@ -32,6 +33,7 @@ namespace BYOVDMonitor
             MaxFileSizeMb = 64;          // драйверы маленькие, большие файлы пропускаем
             IncludeAllExtensions = true; // уязвимый драйвер могут положить под любым именем
             RescanIntervalMinutes = 15;  // фоновый повторный обход как страховка
+            FullRescanIntervalHours = 24; // раз в сутки глубокий обход (защита от подмены с восстановлением timestamps)
         }
 
         // Каталог данных приложения. По умолчанию — %APPDATA%\BYOVDMonitor (для GUI).

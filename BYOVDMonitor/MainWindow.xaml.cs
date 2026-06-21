@@ -21,6 +21,7 @@ namespace BYOVDMonitor
 
         private readonly DispatcherTimer _updateTimer = new DispatcherTimer();
         private readonly DispatcherTimer _rescanTimer = new DispatcherTimer();
+        private readonly DispatcherTimer _fullRescanTimer = new DispatcherTimer();
         private Storyboard _blink;
 
         private bool _alertActive;
@@ -58,6 +59,12 @@ namespace BYOVDMonitor
             _rescanTimer.Interval = TimeSpan.FromMinutes(_config.RescanIntervalMinutes);
             _rescanTimer.Tick += (s, e) => _monitor.Rescan();
 
+            if (_config.FullRescanIntervalHours > 0)
+            {
+                _fullRescanTimer.Interval = TimeSpan.FromHours(_config.FullRescanIntervalHours);
+                _fullRescanTimer.Tick += (s, e) => _monitor.FullRescan();
+            }
+
             Loaded += OnLoaded;
             Closed += OnClosed;
 
@@ -94,6 +101,7 @@ namespace BYOVDMonitor
 
             _updateTimer.Start();
             _rescanTimer.Start();
+            if (_config.FullRescanIntervalHours > 0) _fullRescanTimer.Start();
         }
 
         private void OnClosed(object sender, EventArgs e)
@@ -377,8 +385,9 @@ namespace BYOVDMonitor
 
         private void OnScanNowClick(object sender, RoutedEventArgs e)
         {
-            _monitor.Rescan();
-            StatusBarText.Text = "Rescanning folders...";
+            // Глубокий обход — пересчитывает все хеши, игнорируя baseline.
+            _monitor.FullRescan();
+            StatusBarText.Text = "Full rescan started (recomputing all hashes)...";
         }
 
         // ===== Журнал =====

@@ -37,6 +37,13 @@ matches. Any of the three matches raises the alert.
   files is remembered, so unchanged files (same size + mtime) are
   skipped without rehashing on repeated scans and across restarts.
   Vulnerable files are never cached and are flagged every time.
+- **Periodic deep rescan** (every `FullRescanIntervalHours`, default
+  24 h) that **ignores the baseline** and recomputes every hash from
+  scratch. This closes the narrow attack of "overwrite a clean file
+  with malicious content of identical size, then restore mtime via
+  `SetFileTime`" — the shallow rescan would still trust size+mtime,
+  but the deep rescan will catch it within at most one interval.
+  The "Scan now" button performs the same deep rescan on demand.
 - Cheap PE pre-filter: a new/changed file is first checked for an
   "MZ…PE" header (68 bytes read); only if it's a PE image
   (`.sys`/`.exe`/`.dll`/`.ocx`/`.efi`, etc.) is the full SHA-256
@@ -94,10 +101,11 @@ Output: `bin\Release\net48\BYOVDMonitor.exe`. You can also open the
 
 - File hashing capped at 64 MB per file (configurable, `MaxFileSizeMb`);
   real drivers are tiny.
-- The "skip unchanged" optimisation uses size + mtime. If an attacker
-  modifies a file and restores those attributes, the file will be
-  treated as unchanged until the next real change. To force a fresh
-  check: "Scan now" or "Check file…".
+- Between deep rescans, the "skip unchanged" optimisation trusts size
+  + mtime. An attacker who overwrites a file with same-sized content
+  and restores `LastWriteTime` could evade the watcher and the
+  shallow rescan — but only until the next deep rescan (default
+  24 hours) or a manual "Scan now" / "Check file…".
 - MHR sends the file's SHA-1 to an external DNS server (third party);
   off by default for that reason.
 - The first scan of large recursive trees can take time; subsequent

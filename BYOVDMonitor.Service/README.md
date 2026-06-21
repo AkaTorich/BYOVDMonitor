@@ -63,6 +63,7 @@ below) and restart:
   "MaxFileSizeMb": 64,
   "IncludeAllExtensions": true,
   "RescanIntervalMinutes": 15,
+  "FullRescanIntervalHours": 24,
   "MhrEnabled": false,
   "WebhookUrl": "https://siem.example.com/byovd"
 }
@@ -71,6 +72,12 @@ below) and restart:
 - `Folders` — list of folders to watch. On a server, typically
   `System32\drivers` plus any directories where normal applications
   can drop files (downloads, web roots, profile temp paths).
+- `RescanIntervalMinutes` — shallow rescan interval (uses the
+  baseline; cheap safety net for missed watcher events).
+- `FullRescanIntervalHours` — **deep** rescan interval. Recomputes
+  every file's hashes from scratch, ignoring the baseline. Closes the
+  "overwrite + restore mtime" attack window. Set to `0` to disable
+  (not recommended on servers).
 - `MhrEnabled` — extra per-file lookup of new files in Team Cymru MHR
   (DNS, no API key). Sends the file's SHA-1 to an external DNS server.
   Off by default.

@@ -14,6 +14,7 @@ namespace BYOVDMonitor
         public string Path;
         public bool FromWatcher;
         public string RootPath;
+        public bool ForceRehash;  // при true игнорируем baseline и считаем хеши заново (глубокий обход)
     }
 
     // Мониторинг настроенных папок: наблюдатель в реальном времени плюс обход существующих файлов.
@@ -76,7 +77,7 @@ namespace BYOVDMonitor
             {
                 if (folder == null || string.IsNullOrEmpty(folder.Path)) continue;
                 _baseline.LoadRoot(folder.Path); // локальная база папки
-                ScanFolder(folder);              // обход существующих файлов
+                ScanFolder(folder, false);       // обход существующих файлов (поверхностный)
                 AddWatcher(folder);              // отслеживание новых
             }
         }
@@ -112,13 +113,24 @@ namespace BYOVDMonitor
             }
         }
 
-        // Повторный обход всех папок (например, после обновления базы хешей).
+        // Повторный обход всех папок (поверхностный — пропускает неизменённые файлы по baseline).
         public void Rescan()
         {
             foreach (MonitoredFolder folder in _currentFolders)
             {
                 if (folder == null || string.IsNullOrEmpty(folder.Path)) continue;
-                ScanFolder(folder);
+                ScanFolder(folder, false);
+            }
+        }
+
+        // Глубокий обход — пересчитывает хеши ВСЕХ файлов, игнорируя baseline.
+        // Закрывает дыру с подменой содержимого + восстановлением timestamps.
+        public void FullRescan()
+        {
+            foreach (MonitoredFolder folder in _currentFolders)
+            {
+                if (folder == null || string.IsNullOrEmpty(folder.Path)) continue;
+                ScanFolder(folder, true);
             }
         }
 
@@ -197,20 +209,29 @@ namespace BYOVDMonitor
             RaiseError("Watcher error: " + e.GetException().Message);
         }
 
-        private void Enqueue(string path, bool fromWatcher, string rootPath)
+        private void Enqueue(string path, bool fromWatcher, string rootPath, bool forceRehash = false)
         {
             BlockingCollection<WorkItem> queue = _queue;
             if (queue == null) return;
-            try { queue.Add(new WorkItem { Path = path, FromWatcher = fromWatcher, RootPath = rootPath }); }
+            try
+            {
+                queue.Add(new WorkItem
+                {
+                    Path = path,
+                    FromWatcher = fromWatcher,
+                    RootPath = rootPath,
+                    ForceRehash = forceRehash
+                });
+            }
             catch { } // очередь закрыта при остановке
         }
 
-        private void ScanFolder(MonitoredFolder folder)
+        private void ScanFolder(MonitoredFolder folder, bool forceRehash)
         {
             try
             {
                 foreach (string file in SafeEnumerateFiles(folder.Path, folder.IncludeSubdirectories))
-                    Enqueue(file, false, folder.Path);
+                    Enqueue(file, false, folder.Path, forceRehash);
             }
             catch (Exception ex)
             {
@@ -287,7 +308,9 @@ namespace BYOVDMonitor
                 long mtime = info.LastWriteTimeUtc.Ticks;
 
                 // Файл не менялся с прошлой проверки (по локальной базе папки) — пропускаем без хеширования.
-                if (item.RootPath != null && _baseline.IsUnchanged(item.RootPath, path, size, mtime))
+                // При принудительном пересчёте (глубокий обход) этот фильтр обходится.
+                if (!item.ForceRehash && item.RootPath != null
+                    && _baseline.IsUnchanged(item.RootPath, path, size, mtime))
                     return;
 
                 // Дешёвая отсечка: если это вообще не PE-образ (драйвер/EXE/DLL/OCX/EFI),
@@ -299,7 +322,8 @@ namespace BYOVDMonitor
                 if (hashes == null) return;
 
                 // Содержимое не изменилось (SHA-256 совпал с локальным) — обновляем метку и выходим.
-                if (item.RootPath != null)
+                // При принудительном пересчёте этот шорт-кат обходится: нужна полная сверка с базой.
+                if (!item.ForceRehash && item.RootPath != null)
                 {
                     string knownHash = _baseline.GetHash(item.RootPath, path);
                     if (knownHash != null && string.Equals(knownHash, hashes.Sha256, StringComparison.OrdinalIgnoreCase))

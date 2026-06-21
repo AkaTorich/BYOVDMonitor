@@ -15,6 +15,7 @@ namespace BYOVDMonitor.Service
         private MonitorService _monitor;
         private WebhookSink _webhook;
         private Timer _updateTimer;
+        private Timer _fullRescanTimer;
         private int _updateBusy; // защита от наложения проверок обновлений
 
         public WorkerService()
@@ -65,6 +66,14 @@ namespace BYOVDMonitor.Service
                 // Если нужен апгрейд схемы — первая проверка через 5 секунд, иначе через минуту. Далее раз в час.
                 TimeSpan firstTick = _hashes.NeedsFreshDownload ? TimeSpan.FromSeconds(5) : TimeSpan.FromMinutes(1);
                 _updateTimer = new Timer(UpdateTimerTick, null, firstTick, TimeSpan.FromHours(1));
+
+                // Периодический глубокий обход — защита от подмены содержимого с восстановлением timestamps.
+                if (_config.FullRescanIntervalHours > 0)
+                {
+                    TimeSpan deep = TimeSpan.FromHours(_config.FullRescanIntervalHours);
+                    _fullRescanTimer = new Timer(FullRescanTick, null, deep, deep);
+                    _eventSink.Info("Deep rescan scheduled every " + _config.FullRescanIntervalHours + " hour(s).");
+                }
             }
             catch (Exception ex)
             {
@@ -76,8 +85,23 @@ namespace BYOVDMonitor.Service
         protected override void OnStop()
         {
             try { if (_updateTimer != null) _updateTimer.Dispose(); } catch { }
+            try { if (_fullRescanTimer != null) _fullRescanTimer.Dispose(); } catch { }
             try { if (_monitor != null) _monitor.Stop(); } catch { }
             try { _eventSink.Info("BYOVD Monitor service stopped."); } catch { }
+        }
+
+        // Тик глубокого обхода: пересчитываем все хеши, игнорируя baseline.
+        private void FullRescanTick(object state)
+        {
+            try
+            {
+                if (_monitor != null) _monitor.FullRescan();
+                _eventSink.Info("Deep rescan triggered (baseline bypassed).");
+            }
+            catch (Exception ex)
+            {
+                _eventSink.Warning("Deep rescan failed to start: " + ex.Message);
+            }
         }
 
         protected override void OnShutdown()
