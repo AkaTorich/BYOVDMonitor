@@ -54,7 +54,7 @@ namespace BYOVDMonitor.Service
             {
                 // Журнал событий ограничивает запись 31 839 символами; режем длинное.
                 if (message != null && message.Length > 30000)
-                    message = message.Substring(0, 30000) + "... [обрезано]";
+                    message = message.Substring(0, 30000) + "... [truncated]";
                 _log.WriteEntry(message ?? string.Empty, type, eventId);
             }
             catch

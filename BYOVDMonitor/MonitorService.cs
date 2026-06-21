@@ -135,7 +135,7 @@ namespace BYOVDMonitor
                                  out matchSource, out driverName))
             {
                 return MakeDetection(path, hashes.Sha256,
-                    string.IsNullOrEmpty(driverName) ? "(имя неизвестно)" : driverName,
+                    string.IsNullOrEmpty(driverName) ? "(name unknown)" : driverName,
                     "loldrivers/" + matchSource);
             }
 
@@ -144,7 +144,7 @@ namespace BYOVDMonitor
                 MhrResult r = _mhr.Lookup(hashes.Sha1);
                 if (r.Known)
                     return MakeDetection(path, hashes.Sha256,
-                        "Team Cymru MHR, детект " + r.DetectionRate + "%", "MHR");
+                        "Team Cymru MHR, " + r.DetectionRate + "% detection", "MHR");
             }
 
             return null;
@@ -156,7 +156,7 @@ namespace BYOVDMonitor
             {
                 if (!Directory.Exists(folder.Path))
                 {
-                    RaiseError("Папка не найдена: " + folder.Path);
+                    RaiseError("Folder not found: " + folder.Path);
                     return;
                 }
 
@@ -176,7 +176,7 @@ namespace BYOVDMonitor
             }
             catch (Exception ex)
             {
-                RaiseError("Не удалось наблюдать за папкой " + folder.Path + ": " + ex.Message);
+                RaiseError("Failed to watch folder " + folder.Path + ": " + ex.Message);
             }
         }
 
@@ -194,7 +194,7 @@ namespace BYOVDMonitor
 
         private void OnWatcherError(object sender, ErrorEventArgs e)
         {
-            RaiseError("Сбой наблюдателя: " + e.GetException().Message);
+            RaiseError("Watcher error: " + e.GetException().Message);
         }
 
         private void Enqueue(string path, bool fromWatcher, string rootPath)
@@ -214,7 +214,7 @@ namespace BYOVDMonitor
             }
             catch (Exception ex)
             {
-                RaiseError("Ошибка обхода " + folder.Path + ": " + ex.Message);
+                RaiseError("Scan error in " + folder.Path + ": " + ex.Message);
             }
         }
 
@@ -315,7 +315,7 @@ namespace BYOVDMonitor
                                      out matchSource, out driverName))
                 {
                     RaiseDetectionDedup(path, hashes.Sha256,
-                        string.IsNullOrEmpty(driverName) ? "(имя неизвестно)" : driverName,
+                        string.IsNullOrEmpty(driverName) ? "(name unknown)" : driverName,
                         "loldrivers/" + matchSource);
                     return; // вредоносный — в локальную базу не заносим
                 }
@@ -328,7 +328,7 @@ namespace BYOVDMonitor
                     if (r.Known)
                     {
                         RaiseDetectionDedup(path, hashes.Sha256,
-                            "Team Cymru MHR, детект " + r.DetectionRate + "%", "MHR");
+                            "Team Cymru MHR, " + r.DetectionRate + "% detection", "MHR");
                         return;
                     }
                     if (r.Error != null)
@@ -344,7 +344,7 @@ namespace BYOVDMonitor
             }
             catch (Exception ex)
             {
-                RaiseError("Ошибка обработки " + item.Path + ": " + ex.Message);
+                RaiseError("Failed to process " + item.Path + ": " + ex.Message);
             }
         }
 

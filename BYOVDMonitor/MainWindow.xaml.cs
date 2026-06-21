@@ -73,7 +73,7 @@ namespace BYOVDMonitor
             if (!_hashes.HasLocalList)
             {
                 MessageBoxResult answer = MessageBox.Show(this,
-                    "База хешей уязвимых драйверов не загружена.\n\nЗагрузить её сейчас из loldrivers.io?",
+                    "The vulnerable driver hash list is not loaded.\n\nDownload it now from loldrivers.io?",
                     "BYOVD Monitor", MessageBoxButton.YesNo, MessageBoxImage.Question);
                 if (answer == MessageBoxResult.Yes)
                     await DownloadListAsync();
@@ -81,7 +81,7 @@ namespace BYOVDMonitor
             else if (_hashes.NeedsFreshDownload)
             {
                 // Старый формат базы (без Imphash/Authentihash) — обновляем без диалога.
-                StatusBarText.Text = "Обновляю базу до расширенной схемы (с Imphash/Authentihash)...";
+                StatusBarText.Text = "Upgrading hash list to extended schema (Imphash/Authentihash)...";
                 _ = DownloadListAsync();
             }
             else
@@ -113,18 +113,18 @@ namespace BYOVDMonitor
         {
             DownloadButton.IsEnabled = false;
             CheckUpdateButton.IsEnabled = false;
-            StatusBarText.Text = "Загрузка базы хешей...";
+            StatusBarText.Text = "Downloading hash list...";
             try
             {
                 int count = await _hashes.DownloadAndApplyAsync(_config.HashListUrl);
                 UpdateListStatus();
-                StatusBarText.Text = "База загружена: " + count + " хешей";
+                StatusBarText.Text = "Hash list downloaded: " + count + " entries";
                 if (_monitor.IsRunning) _monitor.Rescan();
             }
             catch (Exception ex)
             {
-                StatusBarText.Text = "Ошибка загрузки базы";
-                MessageBox.Show(this, "Не удалось загрузить базу хешей:\n\n" + ex.Message,
+                StatusBarText.Text = "Hash list download failed";
+                MessageBox.Show(this, "Failed to download the hash list:\n\n" + ex.Message,
                     "BYOVD Monitor", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             finally
@@ -152,7 +152,7 @@ namespace BYOVDMonitor
 
             _checkingUpdates = true;
             CheckUpdateButton.IsEnabled = false;
-            if (!silent) StatusBarText.Text = "Проверка обновлений базы...";
+            if (!silent) StatusBarText.Text = "Checking for hash list updates...";
             try
             {
                 UpdateCheckResult result = await _hashes.CheckForUpdateAsync(_config.HashListUrl);
@@ -160,32 +160,32 @@ namespace BYOVDMonitor
                 if (result.Error != null)
                 {
                     if (!silent)
-                        MessageBox.Show(this, "Не удалось проверить обновления:\n\n" + result.Error,
+                        MessageBox.Show(this, "Failed to check for updates:\n\n" + result.Error,
                             "BYOVD Monitor", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    StatusBarText.Text = "Проверка обновлений не удалась";
+                    StatusBarText.Text = "Update check failed";
                     return;
                 }
 
                 if (result.UpdateAvailable)
                 {
                     MessageBoxResult answer = MessageBox.Show(this,
-                        "Доступно обновление базы хешей (" + result.NewCount + " записей).\n\nЗагрузить?",
+                        "A hash list update is available (" + result.NewCount + " entries).\n\nDownload now?",
                         "BYOVD Monitor", MessageBoxButton.YesNo, MessageBoxImage.Information);
                     if (answer == MessageBoxResult.Yes)
                     {
                         _hashes.ApplyUpdate(result);
                         UpdateListStatus();
                         if (_monitor.IsRunning) _monitor.Rescan();
-                        StatusBarText.Text = "База обновлена: " + result.NewCount + " хешей";
+                        StatusBarText.Text = "Hash list updated: " + result.NewCount + " entries";
                     }
                     else
                     {
-                        StatusBarText.Text = "Доступно обновление базы — нажмите \"Обновить список\"";
+                        StatusBarText.Text = "Update available — click \"Download list\" to fetch";
                     }
                 }
                 else
                 {
-                    if (!silent) StatusBarText.Text = "Обновлений нет";
+                    if (!silent) StatusBarText.Text = "No updates available";
                 }
             }
             finally
@@ -202,16 +202,16 @@ namespace BYOVDMonitor
                 string when = _hashes.LastUpdatedUtc.HasValue
                     ? _hashes.LastUpdatedUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
                     : "—";
-                ListStatusText.Text = "База: SHA-256 " + _hashes.Count
+                ListStatusText.Text = "Hash list: SHA-256 " + _hashes.Count
                     + ", Imphash " + _hashes.ImphashCount
                     + ", Authentihash " + _hashes.AuthentihashCount
-                    + ". Обновлена " + when;
-                DownloadButton.Content = "Обновить список";
+                    + ". Updated " + when;
+                DownloadButton.Content = "Refresh list";
             }
             else
             {
-                ListStatusText.Text = "База хешей не загружена";
-                DownloadButton.Content = "Загрузить список";
+                ListStatusText.Text = "Hash list not loaded";
+                DownloadButton.Content = "Download list";
             }
             if (!_alertActive) RefreshLampIdle();
         }
@@ -232,10 +232,10 @@ namespace BYOVDMonitor
             ClearAlertButton.IsEnabled = true;
 
             SetLamp(ColorAlert, true,
-                "ОБНАРУЖЕН УЯЗВИМЫЙ ДРАЙВЕР",
+                "VULNERABLE DRIVER DETECTED",
                 detection.DriverName + "\n" + detection.FilePath);
 
-            StatusBarText.Text = "Обнаружение: " + detection.FileName + "  (" + detection.DriverName + ")";
+            StatusBarText.Text = "Detection: " + detection.FileName + "  (" + detection.DriverName + ")";
 
             if (SoundCheck.IsChecked == true)
             {
@@ -264,15 +264,15 @@ namespace BYOVDMonitor
 
             if (!_hashes.HasLocalList)
             {
-                SetLamp(ColorIdle, false, "Нет базы", "Загрузите список хешей");
+                SetLamp(ColorIdle, false, "No hash list", "Download the hash list");
             }
             else if (_monitor != null && _monitor.IsRunning && _folders.Count > 0)
             {
-                SetLamp(ColorClear, false, "Чисто", "Наблюдается папок: " + _folders.Count);
+                SetLamp(ColorClear, false, "Clean", "Folders watched: " + _folders.Count);
             }
             else
             {
-                SetLamp(ColorIdle, false, "Ожидание", "Добавьте папки для наблюдения");
+                SetLamp(ColorIdle, false, "Idle", "Add folders to monitor");
             }
         }
 
@@ -314,7 +314,7 @@ namespace BYOVDMonitor
             _alertActive = false;
             ClearAlertButton.IsEnabled = false;
             RefreshLampIdle();
-            StatusBarText.Text = "Тревога сброшена";
+            StatusBarText.Text = "Alert cleared";
         }
 
         // ===== Папки =====
@@ -323,7 +323,7 @@ namespace BYOVDMonitor
         {
             using (var dialog = new System.Windows.Forms.FolderBrowserDialog())
             {
-                dialog.Description = "Выберите папку для наблюдения";
+                dialog.Description = "Select a folder to monitor";
                 if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
                     FolderPathBox.Text = dialog.SelectedPath;
             }
@@ -336,7 +336,7 @@ namespace BYOVDMonitor
 
             if (!Directory.Exists(path))
             {
-                MessageBox.Show(this, "Папка не существует:\n" + path,
+                MessageBox.Show(this, "Folder does not exist:\n" + path,
                     "BYOVD Monitor", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
@@ -345,7 +345,7 @@ namespace BYOVDMonitor
             {
                 if (string.Equals(existing.Path, path, StringComparison.OrdinalIgnoreCase))
                 {
-                    StatusBarText.Text = "Папка уже в списке";
+                    StatusBarText.Text = "Folder already in list";
                     return;
                 }
             }
@@ -359,7 +359,7 @@ namespace BYOVDMonitor
             FolderPathBox.Text = string.Empty;
             SaveConfig();
             StartMonitoring();
-            StatusBarText.Text = "Папка добавлена: " + path;
+            StatusBarText.Text = "Folder added: " + path;
         }
 
         private void OnRemoveFolderClick(object sender, RoutedEventArgs e)
@@ -372,13 +372,13 @@ namespace BYOVDMonitor
             _folders.Remove(folder);
             SaveConfig();
             StartMonitoring();
-            StatusBarText.Text = "Папка удалена";
+            StatusBarText.Text = "Folder removed";
         }
 
         private void OnScanNowClick(object sender, RoutedEventArgs e)
         {
             _monitor.Rescan();
-            StatusBarText.Text = "Запущен повторный обход папок";
+            StatusBarText.Text = "Rescanning folders...";
         }
 
         // ===== Журнал =====
@@ -398,7 +398,7 @@ namespace BYOVDMonitor
             var detection = DetectionsList.SelectedItem as Detection;
             if (detection == null)
             {
-                StatusBarText.Text = "Выберите запись в журнале";
+                StatusBarText.Text = "Select an entry in the log first";
                 return;
             }
 
@@ -416,12 +416,12 @@ namespace BYOVDMonitor
                     if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
                         Process.Start(new ProcessStartInfo("explorer.exe", "\"" + dir + "\"") { UseShellExecute = true });
                     else
-                        StatusBarText.Text = "Файл и папка не найдены";
+                        StatusBarText.Text = "File and folder not found";
                 }
             }
             catch (Exception ex)
             {
-                StatusBarText.Text = "Не удалось открыть папку: " + ex.Message;
+                StatusBarText.Text = "Failed to open folder: " + ex.Message;
             }
         }
 
@@ -432,7 +432,7 @@ namespace BYOVDMonitor
             try
             {
                 Clipboard.SetText(detection.Sha256);
-                StatusBarText.Text = "SHA-256 скопирован в буфер обмена";
+                StatusBarText.Text = "SHA-256 copied to clipboard";
             }
             catch { }
         }
@@ -440,19 +440,19 @@ namespace BYOVDMonitor
         private void OnClearLogClick(object sender, RoutedEventArgs e)
         {
             _detections.Clear();
-            StatusBarText.Text = "Журнал очищен";
+            StatusBarText.Text = "Log cleared";
         }
 
         // Ручная проверка выбранного файла по loldrivers и MHR.
         private async void OnCheckFileClick(object sender, RoutedEventArgs e)
         {
             var dialog = new Microsoft.Win32.OpenFileDialog();
-            dialog.Title = "Выберите файл для проверки";
-            dialog.Filter = "Все файлы (*.*)|*.*";
+            dialog.Title = "Select a file to check";
+            dialog.Filter = "All files (*.*)|*.*";
             if (dialog.ShowDialog(this) != true) return;
 
             string path = dialog.FileName;
-            StatusBarText.Text = "Проверка файла: " + System.IO.Path.GetFileName(path) + "...";
+            StatusBarText.Text = "Checking file: " + System.IO.Path.GetFileName(path) + "...";
             try
             {
                 Detection detection = await System.Threading.Tasks.Task.Run(() => _monitor.CheckFile(path, true));
@@ -462,14 +462,14 @@ namespace BYOVDMonitor
                 }
                 else
                 {
-                    StatusBarText.Text = "Файл чист: не найден ни в loldrivers, ни в MHR";
-                    MessageBox.Show(this, "Файл не найден в базах:\n" + path,
+                    StatusBarText.Text = "File clean: not found in loldrivers or MHR";
+                    MessageBox.Show(this, "File not found in any source:\n" + path,
                         "BYOVD Monitor", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
             }
             catch (Exception ex)
             {
-                StatusBarText.Text = "Ошибка проверки файла: " + ex.Message;
+                StatusBarText.Text = "File check error: " + ex.Message;
             }
         }
 

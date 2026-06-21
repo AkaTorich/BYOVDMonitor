@@ -1,7 +1,7 @@
 ﻿<Window x:Class="BYOVDMonitor.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="BYOVD Monitor — детектор уязвимых драйверов"
+        Title="BYOVD Monitor — vulnerable driver detector"
         Height="720" Width="1040"
         MinHeight="560" MinWidth="880"
         WindowStartupLocation="CenterScreen"
@@ -100,12 +100,12 @@
                     <TextBlock Text="BYOVD Monitor" FontSize="20" FontWeight="SemiBold"/>
                     <TextBlock x:Name="ListStatusText" Margin="0,2,0,0"
                                Foreground="{StaticResource FgDim}"
-                               Text="База хешей не загружена"/>
+                               Text="Hash list not loaded"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button x:Name="DownloadButton" Content="Загрузить список"
+                    <Button x:Name="DownloadButton" Content="Download list"
                             Style="{StaticResource AccentButton}" Click="OnDownloadClick" Margin="0,0,8,0"/>
-                    <Button x:Name="CheckUpdateButton" Content="Проверить обновления" Click="OnCheckUpdateClick"/>
+                    <Button x:Name="CheckUpdateButton" Content="Check for updates" Click="OnCheckUpdateClick"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -138,12 +138,12 @@
                             </Ellipse.Fill>
                         </Ellipse>
                     </Grid>
-                    <TextBlock x:Name="StatusText" Text="Ожидание" FontSize="18" FontWeight="SemiBold"
+                    <TextBlock x:Name="StatusText" Text="Idle" FontSize="18" FontWeight="SemiBold"
                                HorizontalAlignment="Center" Margin="0,12,0,0"/>
-                    <TextBlock x:Name="StatusSubText" Text="Мониторинг не запущен"
+                    <TextBlock x:Name="StatusSubText" Text="Monitoring not running"
                                Foreground="{StaticResource FgDim}" HorizontalAlignment="Center"
                                TextAlignment="Center" TextWrapping="Wrap" Margin="0,4,0,0"/>
-                    <Button x:Name="ClearAlertButton" Content="Сбросить тревогу" Margin="0,14,0,0"
+                    <Button x:Name="ClearAlertButton" Content="Clear alert" Margin="0,14,0,0"
                             Click="OnClearAlertClick" IsEnabled="False"/>
                 </StackPanel>
             </Border>
@@ -159,7 +159,7 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Text="Наблюдаемые папки" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <TextBlock Grid.Row="0" Text="Monitored folders" FontWeight="SemiBold" Margin="0,0,0,8"/>
 
                     <Grid Grid.Row="1" Margin="0,0,0,8">
                         <Grid.ColumnDefinitions>
@@ -169,10 +169,10 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBox x:Name="FolderPathBox" Grid.Column="0" VerticalContentAlignment="Center"/>
-                        <Button Grid.Column="1" Content="Обзор" Margin="8,0,0,0" Click="OnBrowseClick"/>
-                        <CheckBox x:Name="SubfoldersCheck" Grid.Column="2" Content="Вложенные"
+                        <Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="OnBrowseClick"/>
+                        <CheckBox x:Name="SubfoldersCheck" Grid.Column="2" Content="Subfolders"
                                   Margin="10,0,0,0"/>
-                        <Button Grid.Column="3" Content="Добавить" Style="{StaticResource AccentButton}"
+                        <Button Grid.Column="3" Content="Add" Style="{StaticResource AccentButton}"
                                 Margin="8,0,0,0" Click="OnAddFolderClick"/>
                     </Grid>
 
@@ -189,12 +189,12 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Grid.Column="0">
                                             <TextBlock Text="{Binding Path}" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Text="вкл. вложенные папки" FontSize="11"
+                                            <TextBlock Text="incl. subfolders" FontSize="11"
                                                        Foreground="{StaticResource FgDim}"
                                                        Visibility="{Binding IncludeSubdirectories,
                                                            Converter={StaticResource BoolToVisibility}}"/>
                                         </StackPanel>
-                                        <Button Grid.Column="1" Content="Удалить" Padding="8,2"
+                                        <Button Grid.Column="1" Content="Remove" Padding="8,2"
                                                 Tag="{Binding}" Click="OnRemoveFolderClick"/>
                                     </Grid>
                                 </DataTemplate>
@@ -203,10 +203,10 @@
                     </Border>
 
                     <WrapPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0">
-                        <Button Content="Сканировать сейчас" Click="OnScanNowClick"/>
-                        <CheckBox x:Name="SoundCheck" Content="Звук при обнаружении" Margin="16,0,0,0"
+                        <Button Content="Scan now" Click="OnScanNowClick"/>
+                        <CheckBox x:Name="SoundCheck" Content="Sound on detection" Margin="16,0,0,0"
                                   IsChecked="True" Checked="OnSoundToggle" Unchecked="OnSoundToggle"/>
-                        <CheckBox x:Name="MhrCheck" Content="Проверять новые файлы в Team Cymru MHR (DNS, без ключа)"
+                        <CheckBox x:Name="MhrCheck" Content="Check new files via Team Cymru MHR (DNS, no key)"
                                   Margin="16,0,0,0" Checked="OnMhrToggle" Unchecked="OnMhrToggle"/>
                     </WrapPanel>
                 </Grid>
@@ -222,24 +222,24 @@
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
-                <TextBlock Grid.Row="0" Text="Обнаруженные уязвимые драйверы" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                <TextBlock Grid.Row="0" Text="Detected vulnerable drivers" FontWeight="SemiBold" Margin="0,0,0,8"/>
                 <ListView x:Name="DetectionsList" Grid.Row="1" Background="#FF11151A" BorderThickness="0"
                           Foreground="{StaticResource Fg}" MouseDoubleClick="OnDetectionDoubleClick">
                     <ListView.View>
                         <GridView>
-                            <GridViewColumn Header="Время" Width="150" DisplayMemberBinding="{Binding TimeText}"/>
-                            <GridViewColumn Header="Источник" Width="90" DisplayMemberBinding="{Binding Source}"/>
-                            <GridViewColumn Header="Совпадение" Width="230" DisplayMemberBinding="{Binding DriverName}"/>
-                            <GridViewColumn Header="Файл" Width="160" DisplayMemberBinding="{Binding FileName}"/>
-                            <GridViewColumn Header="Путь" Width="340" DisplayMemberBinding="{Binding FilePath}"/>
+                            <GridViewColumn Header="Time" Width="150" DisplayMemberBinding="{Binding TimeText}"/>
+                            <GridViewColumn Header="Source" Width="170" DisplayMemberBinding="{Binding Source}"/>
+                            <GridViewColumn Header="Match" Width="220" DisplayMemberBinding="{Binding DriverName}"/>
+                            <GridViewColumn Header="File" Width="160" DisplayMemberBinding="{Binding FileName}"/>
+                            <GridViewColumn Header="Path" Width="320" DisplayMemberBinding="{Binding FilePath}"/>
                         </GridView>
                     </ListView.View>
                 </ListView>
                 <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
-                    <Button Content="Проверить файл…" Style="{StaticResource AccentButton}" Click="OnCheckFileClick"/>
-                    <Button Content="Открыть папку" Margin="8,0,0,0" Click="OnOpenFolderClick"/>
-                    <Button Content="Копировать SHA-256" Margin="8,0,0,0" Click="OnCopyHashClick"/>
-                    <Button Content="Очистить журнал" Margin="8,0,0,0" Click="OnClearLogClick"/>
+                    <Button Content="Check file…" Style="{StaticResource AccentButton}" Click="OnCheckFileClick"/>
+                    <Button Content="Open folder" Margin="8,0,0,0" Click="OnOpenFolderClick"/>
+                    <Button Content="Copy SHA-256" Margin="8,0,0,0" Click="OnCopyHashClick"/>
+                    <Button Content="Clear log" Margin="8,0,0,0" Click="OnClearLogClick"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -247,7 +247,7 @@
         <!-- Нижняя строка состояния -->
         <Border Grid.Row="3" Margin="0,12,0,0">
             <TextBlock x:Name="StatusBarText" Foreground="{StaticResource FgDim}"
-                       Text="Готово" TextTrimming="CharacterEllipsis"/>
+                       Text="Ready" TextTrimming="CharacterEllipsis"/>
         </Border>
     </Grid>
 </Window>

@@ -52,7 +52,7 @@ namespace BYOVDMonitor
             var result = new MhrResult();
             if (!IsHex40(sha1Hex))
             {
-                result.Error = "Некорректный SHA-1";
+                result.Error = "Invalid SHA-1";
                 return result;
             }
 
