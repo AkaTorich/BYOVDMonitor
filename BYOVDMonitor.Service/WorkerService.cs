@@ -46,7 +46,9 @@ namespace BYOVDMonitor.Service
                 _eventSink.Info(
                     "BYOVD Monitor service started.\r\n" +
                     "Data dir: " + AppConfig.DataDirectory + "\r\n" +
-                    "Hashes loaded: " + _hashes.Count + "\r\n" +
+                    "Hashes loaded: sha256=" + _hashes.Count +
+                        ", imphash=" + _hashes.ImphashCount +
+                        ", authentihash=" + _hashes.AuthentihashCount + "\r\n" +
                     "Monitored folders: " + folderCount + "\r\n" +
                     "MHR: " + (_config.MhrEnabled ? "enabled" : "disabled") + "\r\n" +
                     "Webhook: " + (_webhook.IsEnabled ? "enabled" : "disabled"));
@@ -57,10 +59,12 @@ namespace BYOVDMonitor.Service
 
                 if (!_hashes.HasLocalList)
                     _eventSink.Warning("Hash list is empty. The service will try to download it shortly.");
+                else if (_hashes.NeedsFreshDownload)
+                    _eventSink.Info("Local hash store uses old schema. Full re-download scheduled to populate Imphash/Authentihash.");
 
-                // Первая проверка обновлений через минуту после старта, далее раз в час.
-                _updateTimer = new Timer(UpdateTimerTick, null,
-                    TimeSpan.FromMinutes(1), TimeSpan.FromHours(1));
+                // Если нужен апгрейд схемы — первая проверка через 5 секунд, иначе через минуту. Далее раз в час.
+                TimeSpan firstTick = _hashes.NeedsFreshDownload ? TimeSpan.FromSeconds(5) : TimeSpan.FromMinutes(1);
+                _updateTimer = new Timer(UpdateTimerTick, null, firstTick, TimeSpan.FromHours(1));
             }
             catch (Exception ex)
             {
@@ -104,10 +108,11 @@ namespace BYOVDMonitor.Service
         {
             try
             {
-                if (!_hashes.HasLocalList)
+                if (!_hashes.HasLocalList || _hashes.NeedsFreshDownload)
                 {
                     int n = await _hashes.DownloadAndApplyAsync(_config.HashListUrl).ConfigureAwait(false);
-                    _eventSink.Info("Hash list downloaded: " + n + " entries.");
+                    _eventSink.Info("Hash list downloaded: " + n + " entries (sha256=" + _hashes.Count +
+                        ", imphash=" + _hashes.ImphashCount + ", authentihash=" + _hashes.AuthentihashCount + ").");
                     _monitor.Rescan();
                     return;
                 }

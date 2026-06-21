@@ -28,6 +28,7 @@
     <Compile Include="..\BYOVDMonitor\MhrService.cs" Link="Engine\MhrService.cs" />
     <Compile Include="..\BYOVDMonitor\BaselineStore.cs" Link="Engine\BaselineStore.cs" />
     <Compile Include="..\BYOVDMonitor\PeProbe.cs" Link="Engine\PeProbe.cs" />
+    <Compile Include="..\BYOVDMonitor\PeAnalyzer.cs" Link="Engine\PeAnalyzer.cs" />
     <Compile Include="..\BYOVDMonitor\MonitorService.cs" Link="Engine\MonitorService.cs" />
   </ItemGroup>
 

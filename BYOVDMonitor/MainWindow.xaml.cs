@@ -78,6 +78,12 @@ namespace BYOVDMonitor
                 if (answer == MessageBoxResult.Yes)
                     await DownloadListAsync();
             }
+            else if (_hashes.NeedsFreshDownload)
+            {
+                // Старый формат базы (без Imphash/Authentihash) — обновляем без диалога.
+                StatusBarText.Text = "Обновляю базу до расширенной схемы (с Imphash/Authentihash)...";
+                _ = DownloadListAsync();
+            }
             else
             {
                 // База есть — тихо проверим обновление в фоне (намеренно без await).
@@ -196,7 +202,10 @@ namespace BYOVDMonitor
                 string when = _hashes.LastUpdatedUtc.HasValue
                     ? _hashes.LastUpdatedUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
                     : "—";
-                ListStatusText.Text = "База: " + _hashes.Count + " хешей, обновлена " + when;
+                ListStatusText.Text = "База: SHA-256 " + _hashes.Count
+                    + ", Imphash " + _hashes.ImphashCount
+                    + ", Authentihash " + _hashes.AuthentihashCount
+                    + ". Обновлена " + when;
                 DownloadButton.Content = "Обновить список";
             }
             else

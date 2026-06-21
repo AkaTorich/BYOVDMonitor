@@ -9,19 +9,22 @@ using System.Threading.Tasks;
 
 namespace BYOVDMonitor
 {
-    // Одна запись локального хранилища: хеш и понятное имя драйвера.
+    // Одна запись локального хранилища: набор хешей одного известного образца и понятное имя.
     public class HashEntry
     {
         public string Sha256 { get; set; }
+        public string Imphash { get; set; }
+        public string Authentihash { get; set; }
         public string Name { get; set; }
     }
 
     // Структура файла локального хранилища базы хешей.
     public class HashStore
     {
+        public int SchemaVersion { get; set; }           // 0/1 — старый формат (только Sha256), 2+ — есть Imphash/Authentihash
         public string SourceUrl { get; set; }
         public string DownloadedUtc { get; set; }
-        public string ContentSha256 { get; set; } // хеш самого скачанного JSON для определения изменений
+        public string ContentSha256 { get; set; }
         public string ETag { get; set; }
         public int Count { get; set; }
         public List<HashEntry> Items { get; set; }
@@ -34,23 +37,36 @@ namespace BYOVDMonitor
         public int NewCount { get; set; }
         public string Error { get; set; }
 
-        // Подготовленные данные для применения (заполняются только если UpdateAvailable).
-        internal Dictionary<string, string> Map { get; set; }
+        internal List<HashEntry> Entries { get; set; }
         internal string ContentSha256 { get; set; }
         internal string ETag { get; set; }
         internal string SourceUrl { get; set; }
     }
 
     // Сервис базы известных уязвимых драйверов: скачивание, разбор, хранение, проверка обновлений и сверка.
+    // Поддерживает совпадение по любому из трёх хешей: SHA-256, Imphash, Authentihash.
     public class HashListService
     {
-        // Текущая карта: SHA-256 (верхний регистр) -> имя драйвера. Меняется атомарно через присваивание ссылки.
-        private volatile Dictionary<string, string> _map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public const int CurrentSchemaVersion = 2;
+
+        // Текущие карты: HEX (верхний регистр) -> запись. Меняются атомарно через присваивание ссылки.
+        private volatile Dictionary<string, HashEntry> _bySha256 =
+            new Dictionary<string, HashEntry>(StringComparer.OrdinalIgnoreCase);
+        private volatile Dictionary<string, HashEntry> _byImphash =
+            new Dictionary<string, HashEntry>(StringComparer.OrdinalIgnoreCase);
+        private volatile Dictionary<string, HashEntry> _byAuthentihash =
+            new Dictionary<string, HashEntry>(StringComparer.OrdinalIgnoreCase);
+
         private static readonly HttpClient Http = CreateHttpClient();
 
-        public int Count { get; private set; }
+        public int Count { get { return _bySha256.Count; } }
+        public int ImphashCount { get { return _byImphash.Count; } }
+        public int AuthentihashCount { get { return _byAuthentihash.Count; } }
         public DateTime? LastUpdatedUtc { get; private set; }
         public bool HasLocalList { get; private set; }
+        // true, если на диске лежит база старого формата без Imphash/Authentihash — нужен полный
+        // повторный скачок (приложение должно сделать его без диалога).
+        public bool NeedsFreshDownload { get; private set; }
 
         private static string StorePath
         {
@@ -59,21 +75,43 @@ namespace BYOVDMonitor
 
         private static HttpClient CreateHttpClient()
         {
-            // loldrivers.io работает по HTTPS, на .NET Framework нужно явно включить TLS 1.2.
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             var client = new HttpClient();
-            client.Timeout = TimeSpan.FromSeconds(120); // база большая (~30 МБ)
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("BYOVDMonitor/1.0");
+            client.Timeout = TimeSpan.FromSeconds(120);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("BYOVDMonitor/1.3");
             return client;
         }
 
-        // Проверка совпадения хеша файла с базой.
-        public bool TryMatch(string sha256Upper, out string driverName)
+        // Проверка по трём хешам. Возвращает true и заполняет matchSource/name при первом совпадении.
+        // matchSource: "sha256" | "imphash" | "authentihash".
+        public bool TryMatch(string sha256Upper, string imphashUpper, string authentihashUpper,
+                             out string matchSource, out string name)
         {
-            return _map.TryGetValue(sha256Upper, out driverName);
+            HashEntry entry;
+            if (!string.IsNullOrEmpty(sha256Upper) && _bySha256.TryGetValue(sha256Upper, out entry))
+            {
+                matchSource = "sha256";
+                name = entry.Name ?? string.Empty;
+                return true;
+            }
+            if (!string.IsNullOrEmpty(imphashUpper) && _byImphash.TryGetValue(imphashUpper, out entry))
+            {
+                matchSource = "imphash";
+                name = entry.Name ?? string.Empty;
+                return true;
+            }
+            if (!string.IsNullOrEmpty(authentihashUpper) && _byAuthentihash.TryGetValue(authentihashUpper, out entry))
+            {
+                matchSource = "authentihash";
+                name = entry.Name ?? string.Empty;
+                return true;
+            }
+            matchSource = null;
+            name = null;
+            return false;
         }
 
-        // Загрузка ранее сохранённой базы с диска.
+        // Загрузка ранее сохранённой базы с диска. Если схема старая — отметит NeedsFreshDownload.
         public void Load()
         {
             try
@@ -81,6 +119,7 @@ namespace BYOVDMonitor
                 if (!File.Exists(StorePath))
                 {
                     HasLocalList = false;
+                    NeedsFreshDownload = false;
                     return;
                 }
 
@@ -92,16 +131,29 @@ namespace BYOVDMonitor
                     return;
                 }
 
-                var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (HashEntry entry in store.Items)
+                var bySha256 = new Dictionary<string, HashEntry>(StringComparer.OrdinalIgnoreCase);
+                var byImphash = new Dictionary<string, HashEntry>(StringComparer.OrdinalIgnoreCase);
+                var byAuthen = new Dictionary<string, HashEntry>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (HashEntry e in store.Items)
                 {
-                    if (entry != null && IsSha256(entry.Sha256))
-                        map[entry.Sha256.ToUpperInvariant()] = entry.Name ?? string.Empty;
+                    if (e == null) continue;
+                    if (IsHex(e.Sha256, 64))
+                        bySha256[e.Sha256.ToUpperInvariant()] = e;
+                    if (IsHex(e.Imphash, 32))
+                        byImphash[e.Imphash.ToUpperInvariant()] = e;
+                    if (IsHex(e.Authentihash, 64))
+                        byAuthen[e.Authentihash.ToUpperInvariant()] = e;
                 }
 
-                _map = map;
-                Count = map.Count;
-                HasLocalList = map.Count > 0;
+                _bySha256 = bySha256;
+                _byImphash = byImphash;
+                _byAuthentihash = byAuthen;
+
+                HasLocalList = bySha256.Count > 0;
+                // Старый формат — нет ни одного Imphash/Authentihash при ненулевой базе → надо обновить.
+                NeedsFreshDownload = HasLocalList && store.SchemaVersion < CurrentSchemaVersion;
+
                 DateTime parsed;
                 if (DateTime.TryParse(store.DownloadedUtc, out parsed))
                     LastUpdatedUtc = parsed;
@@ -109,10 +161,12 @@ namespace BYOVDMonitor
             catch
             {
                 HasLocalList = false;
+                NeedsFreshDownload = false;
             }
         }
 
-        // Принудительное скачивание базы и немедленное применение.
+        // Принудительное скачивание базы и немедленное применение (используется при отсутствии
+        // локальной базы или при апгрейде схемы — без учёта ETag).
         public async Task<int> DownloadAndApplyAsync(string url)
         {
             using (HttpResponseMessage response = await Http.GetAsync(url).ConfigureAwait(false))
@@ -123,9 +177,9 @@ namespace BYOVDMonitor
                 string contentHash = Sha256Hex(data);
                 string etag = response.Headers.ETag != null ? response.Headers.ETag.Tag : null;
 
-                Dictionary<string, string> map = ParseHashes(json);
-                ApplyMap(map, contentHash, etag, url);
-                return map.Count;
+                List<HashEntry> entries = ParseEntries(json);
+                ApplyEntries(entries, contentHash, etag, url);
+                return _bySha256.Count;
             }
         }
 
@@ -155,7 +209,6 @@ namespace BYOVDMonitor
                         byte[] data = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
                         string contentHash = Sha256Hex(data);
 
-                        // Сервер может не поддерживать ETag — сравниваем по хешу содержимого.
                         if (!string.IsNullOrEmpty(knownContentHash) &&
                             string.Equals(knownContentHash, contentHash, StringComparison.OrdinalIgnoreCase))
                         {
@@ -164,11 +217,11 @@ namespace BYOVDMonitor
                         }
 
                         string json = Encoding.UTF8.GetString(data);
-                        Dictionary<string, string> map = ParseHashes(json);
+                        List<HashEntry> entries = ParseEntries(json);
 
                         result.UpdateAvailable = true;
-                        result.NewCount = map.Count;
-                        result.Map = map;
+                        result.NewCount = entries.Count;
+                        result.Entries = entries;
                         result.ContentSha256 = contentHash;
                         result.SourceUrl = url;
                         if (response.Headers.ETag != null)
@@ -188,29 +241,47 @@ namespace BYOVDMonitor
         // Применение ранее найденного обновления (без повторного скачивания).
         public void ApplyUpdate(UpdateCheckResult result)
         {
-            if (result == null || result.Map == null) return;
-            ApplyMap(result.Map, result.ContentSha256, result.ETag, result.SourceUrl);
+            if (result == null || result.Entries == null) return;
+            ApplyEntries(result.Entries, result.ContentSha256, result.ETag, result.SourceUrl);
         }
 
-        // Запись новой карты в память и на диск.
-        private void ApplyMap(Dictionary<string, string> map, string contentHash, string etag, string url)
+        // Запись новой базы в память и на диск.
+        private void ApplyEntries(List<HashEntry> entries, string contentHash, string etag, string url)
         {
-            var store = new HashStore();
-            store.SourceUrl = url;
-            store.DownloadedUtc = DateTime.UtcNow.ToString("o");
-            store.ContentSha256 = contentHash;
-            store.ETag = etag;
-            store.Count = map.Count;
-            store.Items = new List<HashEntry>(map.Count);
-            foreach (KeyValuePair<string, string> pair in map)
-                store.Items.Add(new HashEntry { Sha256 = pair.Key, Name = pair.Value });
+            var bySha256 = new Dictionary<string, HashEntry>(StringComparer.OrdinalIgnoreCase);
+            var byImphash = new Dictionary<string, HashEntry>(StringComparer.OrdinalIgnoreCase);
+            var byAuthen = new Dictionary<string, HashEntry>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (HashEntry e in entries)
+            {
+                if (e == null) continue;
+                if (IsHex(e.Sha256, 64))
+                    bySha256[e.Sha256.ToUpperInvariant()] = e;
+                if (IsHex(e.Imphash, 32))
+                    byImphash[e.Imphash.ToUpperInvariant()] = e;
+                if (IsHex(e.Authentihash, 64))
+                    byAuthen[e.Authentihash.ToUpperInvariant()] = e;
+            }
+
+            var store = new HashStore
+            {
+                SchemaVersion = CurrentSchemaVersion,
+                SourceUrl = url,
+                DownloadedUtc = DateTime.UtcNow.ToString("o"),
+                ContentSha256 = contentHash,
+                ETag = etag,
+                Count = bySha256.Count,
+                Items = entries
+            };
 
             Directory.CreateDirectory(AppConfig.DataDirectory);
             File.WriteAllText(StorePath, Json.Serialize(store));
 
-            _map = map;
-            Count = map.Count;
-            HasLocalList = map.Count > 0;
+            _bySha256 = bySha256;
+            _byImphash = byImphash;
+            _byAuthentihash = byAuthen;
+            HasLocalList = bySha256.Count > 0;
+            NeedsFreshDownload = false;
             LastUpdatedUtc = DateTime.UtcNow;
         }
 
@@ -236,31 +307,29 @@ namespace BYOVDMonitor
             catch { return null; }
         }
 
-        // Разбор JSON loldrivers: вытаскиваем SHA-256 образцов и понятное имя драйвера.
-        // Структура устойчиво обрабатывается: сначала ищем сущности с KnownVulnerableSamples,
-        // затем общим проходом подбираем оставшиеся SHA-256.
-        private static Dictionary<string, string> ParseHashes(string json)
+        // Разбор JSON loldrivers: вытаскиваем по каждому образцу SHA-256, Imphash, Authentihash и имя.
+        // Дедуплицируем по SHA-256: если такой уже встречался, дополняем недостающие поля.
+        private static List<HashEntry> ParseEntries(string json)
         {
-            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var bySha256 = new Dictionary<string, HashEntry>(StringComparer.OrdinalIgnoreCase);
             object root = Json.DeserializeObject(json);
-            Collect(root, map);
-            return map;
+            Collect(root, bySha256);
+            return new List<HashEntry>(bySha256.Values);
         }
 
-        private static void Collect(object node, Dictionary<string, string> map)
+        private static void Collect(object node, Dictionary<string, HashEntry> bySha256)
         {
             object[] array = node as object[];
             if (array != null)
             {
                 foreach (object element in array)
-                    Collect(element, map);
+                    Collect(element, bySha256);
                 return;
             }
 
             var dict = node as Dictionary<string, object>;
             if (dict == null) return;
 
-            // Если это запись о драйвере с образцами — извлекаем имена вместе с хешами.
             object samplesObj;
             if (dict.TryGetValue("KnownVulnerableSamples", out samplesObj))
             {
@@ -274,32 +343,54 @@ namespace BYOVDMonitor
                         if (sample == null) continue;
 
                         string sha = GetString(sample, "SHA256");
-                        if (!IsSha256(sha)) continue;
+                        if (!IsHex(sha, 64)) continue;
+                        string shaKey = sha.ToUpperInvariant();
 
-                        string fileName = GetString(sample, "Filename");
-                        string display = !string.IsNullOrEmpty(fileName)
-                            ? (string.IsNullOrEmpty(driverName) ? fileName : driverName + " (" + fileName + ")")
+                        string filename = GetString(sample, "Filename");
+                        string display = !string.IsNullOrEmpty(filename)
+                            ? (string.IsNullOrEmpty(driverName) ? filename : driverName + " (" + filename + ")")
                             : driverName;
 
-                        map[sha.ToUpperInvariant()] = display ?? string.Empty;
+                        HashEntry entry;
+                        if (!bySha256.TryGetValue(shaKey, out entry))
+                        {
+                            entry = new HashEntry { Sha256 = shaKey };
+                            bySha256[shaKey] = entry;
+                        }
+                        if (string.IsNullOrEmpty(entry.Name) && !string.IsNullOrEmpty(display))
+                            entry.Name = display;
+
+                        string imph = GetString(sample, "Imphash");
+                        if (IsHex(imph, 32) && string.IsNullOrEmpty(entry.Imphash))
+                            entry.Imphash = imph.ToUpperInvariant();
+
+                        // Authentihash в loldrivers — вложенный словарь {MD5, SHA1, SHA256}.
+                        // Берём SHA-256 (мой ComputeAuthentihash тоже SHA-256).
+                        string auth = GetNestedString(sample, "Authentihash", "SHA256");
+                        if (auth == null) auth = GetString(sample, "Authentihash"); // запас на простой формат
+                        if (IsHex(auth, 64) && string.IsNullOrEmpty(entry.Authentihash))
+                            entry.Authentihash = auth.ToUpperInvariant();
                     }
                 }
             }
 
-            // Общий проход: ловим SHA-256 в любых других местах, не затирая уже найденные имена.
+            // Общий проход — ловим SHA-256 в других местах (как раньше), не затирая уже найденное.
             foreach (KeyValuePair<string, object> pair in dict)
             {
                 if (string.Equals(pair.Key, "SHA256", StringComparison.OrdinalIgnoreCase))
                 {
                     string sha = pair.Value as string;
-                    if (IsSha256(sha) && !map.ContainsKey(sha.ToUpperInvariant()))
-                        map[sha.ToUpperInvariant()] = string.Empty;
+                    if (IsHex(sha, 64))
+                    {
+                        string key = sha.ToUpperInvariant();
+                        if (!bySha256.ContainsKey(key))
+                            bySha256[key] = new HashEntry { Sha256 = key };
+                    }
                 }
-                Collect(pair.Value, map);
+                Collect(pair.Value, bySha256);
             }
         }
 
-        // Подбор понятного имени драйвера из записи loldrivers.
         private static string DriverDisplayName(Dictionary<string, object> driver)
         {
             object tagsObj;
@@ -312,13 +403,10 @@ namespace BYOVDMonitor
                     if (!string.IsNullOrEmpty(first)) return first;
                 }
             }
-
             string category = GetString(driver, "Category");
             if (!string.IsNullOrEmpty(category)) return category;
-
             string id = GetString(driver, "Id");
             if (!string.IsNullOrEmpty(id)) return id;
-
             return string.Empty;
         }
 
@@ -330,10 +418,19 @@ namespace BYOVDMonitor
             return null;
         }
 
-        // Проверка, что строка похожа на SHA-256 (64 шестнадцатеричных символа).
-        private static bool IsSha256(string value)
+        // Достаём строку из вложенного словаря: dict[outerKey][innerKey].
+        private static string GetNestedString(Dictionary<string, object> dict, string outerKey, string innerKey)
         {
-            if (value == null || value.Length != 64) return false;
+            object value;
+            if (!dict.TryGetValue(outerKey, out value)) return null;
+            var inner = value as Dictionary<string, object>;
+            if (inner == null) return null;
+            return GetString(inner, innerKey);
+        }
+
+        private static bool IsHex(string value, int expectedLength)
+        {
+            if (value == null || value.Length != expectedLength) return false;
             for (int i = 0; i < value.Length; i++)
             {
                 char c = value[i];

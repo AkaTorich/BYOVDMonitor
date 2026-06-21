@@ -127,19 +127,23 @@ namespace BYOVDMonitor
         {
             if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
 
-            string sha256, sha1;
-            if (!ComputeHashes(path, out sha256, out sha1)) return null;
+            FileHashes hashes = ComputeAllHashes(path);
+            if (hashes == null) return null;
 
-            string driverName;
-            if (_hashes.TryMatch(sha256, out driverName))
-                return MakeDetection(path, sha256,
-                    string.IsNullOrEmpty(driverName) ? "(имя неизвестно)" : driverName, "loldrivers");
-
-            if (useMhr)
+            string matchSource, driverName;
+            if (_hashes.TryMatch(hashes.Sha256, hashes.Imphash, hashes.Authentihash,
+                                 out matchSource, out driverName))
             {
-                MhrResult r = _mhr.Lookup(sha1);
+                return MakeDetection(path, hashes.Sha256,
+                    string.IsNullOrEmpty(driverName) ? "(имя неизвестно)" : driverName,
+                    "loldrivers/" + matchSource);
+            }
+
+            if (useMhr && hashes.Sha1 != null)
+            {
+                MhrResult r = _mhr.Lookup(hashes.Sha1);
                 if (r.Known)
-                    return MakeDetection(path, sha256,
+                    return MakeDetection(path, hashes.Sha256,
                         "Team Cymru MHR, детект " + r.DetectionRate + "%", "MHR");
             }
 
@@ -291,37 +295,40 @@ namespace BYOVDMonitor
                 if (!PeProbe.IsPortableExecutable(path))
                     return;
 
-                string sha256, sha1;
-                if (!ComputeHashes(path, out sha256, out sha1)) return;
+                FileHashes hashes = ComputeAllHashes(path);
+                if (hashes == null) return;
 
-                // Содержимое не изменилось (хеш совпал с локальным) — обновляем метку и пропускаем проверку.
+                // Содержимое не изменилось (SHA-256 совпал с локальным) — обновляем метку и выходим.
                 if (item.RootPath != null)
                 {
                     string knownHash = _baseline.GetHash(item.RootPath, path);
-                    if (knownHash != null && string.Equals(knownHash, sha256, StringComparison.OrdinalIgnoreCase))
+                    if (knownHash != null && string.Equals(knownHash, hashes.Sha256, StringComparison.OrdinalIgnoreCase))
                     {
-                        _baseline.Set(item.RootPath, path, size, mtime, sha256);
+                        _baseline.Set(item.RootPath, path, size, mtime, hashes.Sha256);
                         return;
                     }
                 }
 
-                // Сверка с базой loldrivers.
-                string driverName;
-                if (_hashes.TryMatch(sha256, out driverName))
+                // Сверка с базой loldrivers по трём хешам сразу.
+                string matchSource, driverName;
+                if (_hashes.TryMatch(hashes.Sha256, hashes.Imphash, hashes.Authentihash,
+                                     out matchSource, out driverName))
                 {
-                    RaiseDetectionDedup(path, sha256,
-                        string.IsNullOrEmpty(driverName) ? "(имя неизвестно)" : driverName, "loldrivers");
+                    RaiseDetectionDedup(path, hashes.Sha256,
+                        string.IsNullOrEmpty(driverName) ? "(имя неизвестно)" : driverName,
+                        "loldrivers/" + matchSource);
                     return; // вредоносный — в локальную базу не заносим
                 }
 
-                // Дополнительная проверка новых файлов в MHR.
-                if (item.FromWatcher && _config.MhrEnabled)
+                // Дополнительная проверка новых файлов в MHR (по SHA-1).
+                if (item.FromWatcher && _config.MhrEnabled && hashes.Sha1 != null)
                 {
                     ThrottleMhr();
-                    MhrResult r = _mhr.Lookup(sha1);
+                    MhrResult r = _mhr.Lookup(hashes.Sha1);
                     if (r.Known)
                     {
-                        RaiseDetectionDedup(path, sha256, "Team Cymru MHR, детект " + r.DetectionRate + "%", "MHR");
+                        RaiseDetectionDedup(path, hashes.Sha256,
+                            "Team Cymru MHR, детект " + r.DetectionRate + "%", "MHR");
                         return;
                     }
                     if (r.Error != null)
@@ -333,7 +340,7 @@ namespace BYOVDMonitor
 
                 // Чистый файл — заносим в локальную базу папки, чтобы не перепроверять повторно.
                 if (item.RootPath != null)
-                    _baseline.Set(item.RootPath, path, size, mtime, sha256);
+                    _baseline.Set(item.RootPath, path, size, mtime, hashes.Sha256);
             }
             catch (Exception ex)
             {
@@ -352,33 +359,41 @@ namespace BYOVDMonitor
             }
         }
 
-        // Подсчёт SHA-256 и SHA-1 за один проход чтения файла, с повторами при занятом файле.
-        private static bool ComputeHashes(string path, out string sha256Hex, out string sha1Hex)
+        // Все хеши файла, посчитанные за одно чтение.
+        private class FileHashes
         {
-            sha256Hex = null;
-            sha1Hex = null;
+            public string Sha256;
+            public string Sha1;
+            public string Imphash;       // может быть null, если не удалось разобрать PE
+            public string Authentihash;  // может быть null, если не удалось разобрать PE
+        }
+
+        // Чтение файла целиком + подсчёт всех хешей (SHA-256, SHA-1, Imphash, Authentihash).
+        // Драйверы маленькие; MaxFileSizeMb уже ограничивает входной размер. Чтение в памяти —
+        // быстрее, чем многопроходный стрим, и даёт PeAnalyzer прямой доступ к байтам.
+        private static FileHashes ComputeAllHashes(string path)
+        {
+            byte[] bytes = null;
             for (int attempt = 0; attempt < 4; attempt++)
             {
                 try
                 {
                     using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
                                FileShare.ReadWrite | FileShare.Delete))
-                    using (SHA256 sha256 = SHA256.Create())
-                    using (SHA1 sha1 = SHA1.Create())
                     {
-                        byte[] buffer = new byte[65536];
-                        int read;
-                        while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+                        long len = stream.Length;
+                        if (len <= 0 || len > int.MaxValue) return null;
+                        bytes = new byte[len];
+                        int read = 0;
+                        while (read < bytes.Length)
                         {
-                            sha256.TransformBlock(buffer, 0, read, null, 0);
-                            sha1.TransformBlock(buffer, 0, read, null, 0);
+                            int n = stream.Read(bytes, read, bytes.Length - read);
+                            if (n <= 0) break;
+                            read += n;
                         }
-                        sha256.TransformFinalBlock(buffer, 0, 0);
-                        sha1.TransformFinalBlock(buffer, 0, 0);
-                        sha256Hex = ToHex(sha256.Hash);
-                        sha1Hex = ToHex(sha1.Hash);
-                        return true;
+                        if (read != bytes.Length) bytes = null;
                     }
+                    if (bytes != null) break;
                 }
                 catch (IOException)
                 {
@@ -386,10 +401,22 @@ namespace BYOVDMonitor
                 }
                 catch (UnauthorizedAccessException)
                 {
-                    return false;
+                    return null;
                 }
             }
-            return false;
+            if (bytes == null) return null;
+
+            var result = new FileHashes();
+            using (SHA256 sha256 = SHA256.Create())
+                result.Sha256 = ToHex(sha256.ComputeHash(bytes));
+            using (SHA1 sha1 = SHA1.Create())
+                result.Sha1 = ToHex(sha1.ComputeHash(bytes));
+
+            // Imphash и Authentihash могут не получиться (повреждённый PE) — это не ошибка.
+            result.Imphash = PeAnalyzer.ComputeImphash(bytes);
+            result.Authentihash = PeAnalyzer.ComputeAuthentihash(bytes);
+
+            return result;
         }
 
         private static string ToHex(byte[] bytes)
