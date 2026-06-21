@@ -1,0 +1,18 @@
+<Project>
+
+  <!--
+    Общие свойства сборки для всех проектов решения.
+    MSBuild подбирает этот файл автоматически при поиске вверх по дереву от .csproj.
+  -->
+
+  <PropertyGroup>
+    <!-- Все артефакты сборки в одну папку bin\ на уровне решения. -->
+    <BaseOutputPath>$(MSBuildThisFileDirectory)bin\</BaseOutputPath>
+    <OutputPath>$(BaseOutputPath)</OutputPath>
+
+    <!-- Без этих двух флагов путь стал бы bin\Release\net48\ и т. п. -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+
+</Project>

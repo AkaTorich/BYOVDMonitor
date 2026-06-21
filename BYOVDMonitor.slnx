@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="BYOVDMonitor.Service/Service.csproj" />
+  <Project Path="BYOVDMonitor/BYOVDMonitor.csproj" />
+</Solution>
