@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <RootNamespace>BYOVDMonitor.Service</RootNamespace>
+    <AssemblyName>BYOVDMonitorService</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyTitle>BYOVD Monitor Service</AssemblyTitle>
+    <Product>BYOVD Monitor</Product>
+    <Version>1.2.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.ServiceProcess" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Web" />
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+  <!-- Переиспользуем движок обнаружения из GUI-проекта без изменений -->
+  <ItemGroup>
+    <Compile Include="..\BYOVDMonitor\Json.cs" Link="Engine\Json.cs" />
+    <Compile Include="..\BYOVDMonitor\AppConfig.cs" Link="Engine\AppConfig.cs" />
+    <Compile Include="..\BYOVDMonitor\Detection.cs" Link="Engine\Detection.cs" />
+    <Compile Include="..\BYOVDMonitor\HashListService.cs" Link="Engine\HashListService.cs" />
+    <Compile Include="..\BYOVDMonitor\MhrService.cs" Link="Engine\MhrService.cs" />
+    <Compile Include="..\BYOVDMonitor\BaselineStore.cs" Link="Engine\BaselineStore.cs" />
+    <Compile Include="..\BYOVDMonitor\PeProbe.cs" Link="Engine\PeProbe.cs" />
+    <Compile Include="..\BYOVDMonitor\MonitorService.cs" Link="Engine\MonitorService.cs" />
+  </ItemGroup>
+
+</Project>

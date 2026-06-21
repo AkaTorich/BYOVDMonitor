@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>BYOVDMonitor</RootNamespace>
+    <AssemblyName>BYOVDMonitor</AssemblyName>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyTitle>BYOVD Monitor</AssemblyTitle>
+    <Product>BYOVD Monitor</Product>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- JavaScriptSerializer for JSON parsing without third-party packages -->
+    <Reference Include="System.Web.Extensions" />
+    <!-- System.Web is a dependency of System.Web.Extensions; needed by the XAML markup compiler -->
+    <Reference Include="System.Web" />
+    <!-- HttpClient lives in its own assembly on .NET Framework -->
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+
+</Project>
