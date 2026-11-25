@@ -50,6 +50,8 @@ namespace BYOVDMonitor
 
             SoundCheck.IsChecked = _config.SoundEnabled;
             MhrCheck.IsChecked = _config.MhrEnabled;
+            DriverWatchCheck.IsChecked = _config.DriverLoadWatchEnabled;
+            SigCheck.IsChecked = _config.SignatureCheckEnabled;
 
             _blink = (Storyboard)FindResource("BlinkStoryboard");
 
@@ -67,14 +69,52 @@ namespace BYOVDMonitor
 
             Loaded += OnLoaded;
             Closed += OnClosed;
+            StateChanged += OnWindowStateChanged;
 
             RefreshLampIdle();
+        }
+
+        // ===== Управление нестандартным окном (WindowStyle=None) =====
+
+        private void OnMinimizeClick(object sender, RoutedEventArgs e)
+        {
+            WindowState = WindowState.Minimized;
+        }
+
+        private void OnMaximizeClick(object sender, RoutedEventArgs e)
+        {
+            WindowState = WindowState == WindowState.Maximized
+                ? WindowState.Normal : WindowState.Maximized;
+        }
+
+        private void OnCloseClick(object sender, RoutedEventArgs e)
+        {
+            Close();
+        }
+
+        // В развёрнутом виде окно уходит под рамку изменения размера — компенсируем отступом,
+        // а скруглённые «киберпанк»-углы делаем прямыми (во весь экран).
+        private void OnWindowStateChanged(object sender, EventArgs e)
+        {
+            if (WindowState == WindowState.Maximized)
+            {
+                RootBorder.Margin = new Thickness(7);
+                RootBorder.CornerRadius = new CornerRadius(0);
+                MaxButton.Content = "❐";
+            }
+            else
+            {
+                RootBorder.Margin = new Thickness(0);
+                RootBorder.CornerRadius = new CornerRadius(20, 5, 20, 5);
+                MaxButton.Content = "▢";
+            }
         }
 
         private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             _hashes.Load();
             UpdateListStatus();
+            LoadHistory();
 
             // База ещё не загружена — предлагаем скачать сразу при старте.
             if (!_hashes.HasLocalList)
@@ -176,19 +216,31 @@ namespace BYOVDMonitor
 
                 if (result.UpdateAvailable)
                 {
-                    MessageBoxResult answer = MessageBox.Show(this,
-                        "A hash list update is available (" + result.NewCount + " entries).\n\nDownload now?",
-                        "BYOVD Monitor", MessageBoxButton.YesNo, MessageBoxImage.Information);
-                    if (answer == MessageBoxResult.Yes)
+                    // Фоновая/ежечасная проверка (silent) применяет обновление сама, без вопроса —
+                    // база хешей всегда свежая. Ручная проверка кнопкой по-прежнему спрашивает.
+                    if (silent)
                     {
                         _hashes.ApplyUpdate(result);
                         UpdateListStatus();
                         if (_monitor.IsRunning) _monitor.Rescan();
-                        StatusBarText.Text = "Hash list updated: " + result.NewCount + " entries";
+                        StatusBarText.Text = "Hash list auto-updated: " + result.NewCount + " entries";
                     }
                     else
                     {
-                        StatusBarText.Text = "Update available — click \"Download list\" to fetch";
+                        MessageBoxResult answer = MessageBox.Show(this,
+                            "A hash list update is available (" + result.NewCount + " entries).\n\nDownload now?",
+                            "BYOVD Monitor", MessageBoxButton.YesNo, MessageBoxImage.Information);
+                        if (answer == MessageBoxResult.Yes)
+                        {
+                            _hashes.ApplyUpdate(result);
+                            UpdateListStatus();
+                            if (_monitor.IsRunning) _monitor.Rescan();
+                            StatusBarText.Text = "Hash list updated: " + result.NewCount + " entries";
+                        }
+                        else
+                        {
+                            StatusBarText.Text = "Update available — click \"Download list\" to fetch";
+                        }
                     }
                 }
                 else
@@ -235,15 +287,17 @@ namespace BYOVDMonitor
         private void OnDetected(Detection detection)
         {
             _detections.Insert(0, detection);
+            DetectionLog.Append(detection); // постоянный журнал на диске
 
             _alertActive = true;
             ClearAlertButton.IsEnabled = true;
 
             SetLamp(ColorAlert, true,
                 "VULNERABLE DRIVER DETECTED",
-                detection.DriverName + "\n" + detection.FilePath);
+                "[" + (detection.Confidence ?? "-") + "] " + detection.DriverName + "\n" + detection.FilePath);
 
-            StatusBarText.Text = "Detection: " + detection.FileName + "  (" + detection.DriverName + ")";
+            StatusBarText.Text = "Detection [" + (detection.Confidence ?? "-") + "]: "
+                + detection.FileName + "  (" + detection.DriverName + ")";
 
             if (SoundCheck.IsChecked == true)
             {
@@ -262,6 +316,20 @@ namespace BYOVDMonitor
         private void OnMonitorError(string message)
         {
             StatusBarText.Text = message;
+        }
+
+        // Заполнение журнала прошлыми срабатываниями с диска — без тревоги и мигания лампы.
+        private void LoadHistory()
+        {
+            try
+            {
+                List<Detection> history = DetectionLog.LoadRecent(500);
+                foreach (Detection d in history)
+                    _detections.Add(d); // уже в порядке «новые первыми»
+                if (history.Count > 0)
+                    StatusBarText.Text = "Loaded " + history.Count + " past detection(s) from log";
+            }
+            catch { }
         }
 
         // ===== Лампа =====
@@ -501,11 +569,30 @@ namespace BYOVDMonitor
             _config.Save();
         }
 
+        private void OnDriverWatchToggle(object sender, RoutedEventArgs e)
+        {
+            if (_config == null) return;
+            _config.DriverLoadWatchEnabled = DriverWatchCheck.IsChecked == true;
+            _config.Save();
+            // Наблюдатель за установкой включается/выключается в Start() — перезапускаем мониторинг.
+            if (_monitor != null && _monitor.IsRunning) StartMonitoring();
+        }
+
+        private void OnSigToggle(object sender, RoutedEventArgs e)
+        {
+            // Проверка подписи читается на лету при событии установки — перезапуск не нужен.
+            if (_config == null) return;
+            _config.SignatureCheckEnabled = SigCheck.IsChecked == true;
+            _config.Save();
+        }
+
         private void SaveConfig()
         {
             _config.Folders = new List<MonitoredFolder>(_folders);
             _config.SoundEnabled = SoundCheck.IsChecked == true;
             _config.MhrEnabled = MhrCheck.IsChecked == true;
+            _config.DriverLoadWatchEnabled = DriverWatchCheck.IsChecked == true;
+            _config.SignatureCheckEnabled = SigCheck.IsChecked == true;
             _config.Save();
         }
     }

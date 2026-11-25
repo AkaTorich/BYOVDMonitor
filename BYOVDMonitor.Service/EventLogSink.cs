@@ -44,6 +44,7 @@ namespace BYOVDMonitor.Service
                 "File: " + detection.FilePath + "\r\n" +
                 "SHA-256: " + detection.Sha256 + "\r\n" +
                 "Match: " + detection.DriverName + "\r\n" +
+                "Confidence: " + (detection.Confidence ?? "-") + "\r\n" +
                 "Source: " + detection.Source;
             Write(EventLogEntryType.Error, EventIdAlert, text);
         }

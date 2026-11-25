@@ -29,6 +29,9 @@
     <Compile Include="..\BYOVDMonitor\BaselineStore.cs" Link="Engine\BaselineStore.cs" />
     <Compile Include="..\BYOVDMonitor\PeProbe.cs" Link="Engine\PeProbe.cs" />
     <Compile Include="..\BYOVDMonitor\PeAnalyzer.cs" Link="Engine\PeAnalyzer.cs" />
+    <Compile Include="..\BYOVDMonitor\DriverLoadWatcher.cs" Link="Engine\DriverLoadWatcher.cs" />
+    <Compile Include="..\BYOVDMonitor\SignatureChecker.cs" Link="Engine\SignatureChecker.cs" />
+    <Compile Include="..\BYOVDMonitor\DetectionLog.cs" Link="Engine\DetectionLog.cs" />
     <Compile Include="..\BYOVDMonitor\MonitorService.cs" Link="Engine\MonitorService.cs" />
   </ItemGroup>
 

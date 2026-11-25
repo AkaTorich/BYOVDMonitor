@@ -119,8 +119,10 @@ namespace BYOVDMonitor.Service
                 return rc;
 
             RunSc("description " + ServiceName + " \"" + Description + "\"");
-            // Перезапуск при сбое: 60 сек, 60 сек, 60 сек.
-            RunSc("failure " + ServiceName + " reset= 86400 actions= restart/60000/restart/60000/restart/60000");
+            // Самозащита (вотчдог): перезапуск при сбое каждые 60 сек. reset= 60 сбрасывает счётчик
+            // сбоев после минуты работы, поэтому служба перезапускается при КАЖДОМ убийстве процесса,
+            // а не только три раза в сутки.
+            RunSc("failure " + ServiceName + " reset= 60 actions= restart/60000/restart/60000/restart/60000");
 
             Console.WriteLine("Service installed. Starting...");
             RunSc("start " + ServiceName);

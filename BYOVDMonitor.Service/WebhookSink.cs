@@ -31,6 +31,7 @@ namespace BYOVDMonitor.Service
                     { "file", detection.FilePath },
                     { "sha256", detection.Sha256 },
                     { "match", detection.DriverName },
+                    { "confidence", detection.Confidence },
                     { "source", detection.Source }
                 };
                 string json = Json.Serialize(payload);

@@ -114,6 +114,7 @@ namespace BYOVDMonitor.Service
         {
             try { _eventSink.Alert(detection); } catch { }
             try { if (_webhook != null) _webhook.Send(detection); } catch { }
+            try { DetectionLog.Append(detection); } catch { }
         }
 
         private void OnMonitorError(string message)

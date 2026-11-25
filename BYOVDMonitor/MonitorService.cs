@@ -33,6 +33,9 @@ namespace BYOVDMonitor
         private readonly HashSet<string> _alerted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly object _alertLock = new object();
 
+        // Наблюдатель за установкой драйверов (журнал событий) — ловит BYOVD по любому пути, не только в папках.
+        private readonly DriverLoadWatcher _driverWatcher = new DriverLoadWatcher();
+
         // Ограничение частоты запросов в MHR, чтобы не нагружать сервис.
         private readonly object _mhrLock = new object();
         private DateTime _lastMhr = DateTime.MinValue;
@@ -80,12 +83,25 @@ namespace BYOVDMonitor
                 ScanFolder(folder, false);       // обход существующих файлов (поверхностный)
                 AddWatcher(folder);              // отслеживание новых
             }
+
+            // Наблюдение за установкой драйверов — независимо от списка папок.
+            if (_config.DriverLoadWatchEnabled)
+            {
+                _driverWatcher.Installed -= OnDriverInstalled;
+                _driverWatcher.Error -= RaiseError;
+                _driverWatcher.Installed += OnDriverInstalled;
+                _driverWatcher.Error += RaiseError;
+                try { _driverWatcher.Start(); }
+                catch (Exception ex) { RaiseError("Driver-load watch failed to start: " + ex.Message); }
+            }
         }
 
         // Остановка мониторинга, сохранение локальных баз и освобождение ресурсов.
         public void Stop()
         {
             _running = false;
+
+            try { _driverWatcher.Stop(); } catch { }
 
             foreach (FileSystemWatcher watcher in _watchers)
             {
@@ -148,7 +164,7 @@ namespace BYOVDMonitor
             {
                 return MakeDetection(path, hashes.Sha256,
                     string.IsNullOrEmpty(driverName) ? "(name unknown)" : driverName,
-                    "loldrivers/" + matchSource);
+                    "loldrivers/" + matchSource, ConfidenceForMatch(matchSource));
             }
 
             if (useMhr && hashes.Sha1 != null)
@@ -156,7 +172,8 @@ namespace BYOVDMonitor
                 MhrResult r = _mhr.Lookup(hashes.Sha1);
                 if (r.Known)
                     return MakeDetection(path, hashes.Sha256,
-                        "Team Cymru MHR, " + r.DetectionRate + "% detection", "MHR");
+                        "Team Cymru MHR, " + r.DetectionRate + "% detection", "MHR",
+                        ConfidenceForMhr(r.DetectionRate));
             }
 
             return null;
@@ -340,7 +357,7 @@ namespace BYOVDMonitor
                 {
                     RaiseDetectionDedup(path, hashes.Sha256,
                         string.IsNullOrEmpty(driverName) ? "(name unknown)" : driverName,
-                        "loldrivers/" + matchSource);
+                        "loldrivers/" + matchSource, ConfidenceForMatch(matchSource));
                     return; // вредоносный — в локальную базу не заносим
                 }
 
@@ -352,7 +369,8 @@ namespace BYOVDMonitor
                     if (r.Known)
                     {
                         RaiseDetectionDedup(path, hashes.Sha256,
-                            "Team Cymru MHR, " + r.DetectionRate + "% detection", "MHR");
+                            "Team Cymru MHR, " + r.DetectionRate + "% detection", "MHR",
+                            ConfidenceForMhr(r.DetectionRate));
                         return;
                     }
                     if (r.Error != null)
@@ -369,6 +387,70 @@ namespace BYOVDMonitor
             catch (Exception ex)
             {
                 RaiseError("Failed to process " + item.Path + ": " + ex.Message);
+            }
+        }
+
+        // Обработка события установки драйвера: хешируем файл по его реальному пути и сверяем с базой.
+        // Ловит уязвимый драйвер, положенный мимо наблюдаемых папок (в temp, профиль и т. п.).
+        private void OnDriverInstalled(DriverInstallInfo info)
+        {
+            try
+            {
+                string tag = info.Origin;
+                string svc = string.IsNullOrEmpty(info.ServiceName) ? null : info.ServiceName;
+                string path = info.ResolvedPath;
+
+                if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                {
+                    // Файл недоступен для хеширования (уже удалён / путь не разобран) — сообщаем, но не хешируем.
+                    RaiseError("Driver service installed: " + (svc ?? "(unnamed)") +
+                               " -> " + (info.ImagePath ?? "(no path)") + " [event " + tag + "]");
+                    return;
+                }
+
+                FileHashes hashes = ComputeAllHashes(path);
+                if (hashes == null) return;
+
+                string nameSuffix = svc != null ? " [service: " + svc + "]" : string.Empty;
+
+                string matchSource, driverName;
+                if (_hashes.TryMatch(hashes.Sha256, hashes.Imphash, hashes.Authentihash,
+                                     out matchSource, out driverName))
+                {
+                    RaiseDetectionDedup(path, hashes.Sha256,
+                        (string.IsNullOrEmpty(driverName) ? "(name unknown)" : driverName) + nameSuffix,
+                        "driver-install/" + matchSource, ConfidenceForMatch(matchSource));
+                    return;
+                }
+
+                if (_config.MhrEnabled && hashes.Sha1 != null)
+                {
+                    ThrottleMhr();
+                    MhrResult r = _mhr.Lookup(hashes.Sha1);
+                    if (r.Known)
+                    {
+                        RaiseDetectionDedup(path, hashes.Sha256,
+                            "Team Cymru MHR, " + r.DetectionRate + "% detection" + nameSuffix,
+                            "driver-install/MHR", ConfidenceForMhr(r.DetectionRate));
+                        return;
+                    }
+                }
+
+                // Эвристика по подписи: установленный драйвер с отозванной/недоверенной подписью.
+                if (_config.SignatureCheckEnabled)
+                {
+                    string sigReason = SignatureChecker.SuspiciousReason(path);
+                    if (sigReason != null)
+                    {
+                        RaiseDetectionDedup(path, hashes.Sha256,
+                            "Suspicious signature: " + sigReason + nameSuffix,
+                            "driver-install/signature", "Low");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                RaiseError("Failed to handle driver install: " + ex.Message);
             }
         }
 
@@ -451,7 +533,25 @@ namespace BYOVDMonitor
             return builder.ToString();
         }
 
-        private static Detection MakeDetection(string path, string sha256, string name, string source)
+        // Соответствие вида совпадения уровню доверия.
+        // SHA-256 и Authentihash — точное содержимое, высокое доверие.
+        // Imphash — отпечаток таблицы импортов, у разных драйверов нередко совпадает, низкое доверие.
+        internal static string ConfidenceForMatch(string matchSource)
+        {
+            if (string.Equals(matchSource, "imphash", StringComparison.OrdinalIgnoreCase))
+                return "Low";
+            return "High"; // sha256 | authentihash
+        }
+
+        // Вердикт MHR относится к хешу (вредоносный образец), но не доказывает, что это именно
+        // уязвимый драйвер. Высокий процент детекта повышает доверие, низкий — оставляет средним.
+        internal static string ConfidenceForMhr(int detectionRate)
+        {
+            return detectionRate >= 50 ? "High" : "Medium";
+        }
+
+        private static Detection MakeDetection(string path, string sha256, string name, string source,
+                                               string confidence)
         {
             return new Detection
             {
@@ -459,11 +559,13 @@ namespace BYOVDMonitor
                 FilePath = path,
                 Sha256 = sha256,
                 DriverName = name,
-                Source = source
+                Source = source,
+                Confidence = confidence
             };
         }
 
-        private void RaiseDetectionDedup(string path, string sha256, string name, string source)
+        private void RaiseDetectionDedup(string path, string sha256, string name, string source,
+                                         string confidence)
         {
             string key = path.ToUpperInvariant() + "|" + sha256 + "|" + source;
             lock (_alertLock)
@@ -471,7 +573,7 @@ namespace BYOVDMonitor
                 if (_alerted.Contains(key)) return;
                 _alerted.Add(key);
             }
-            RaiseDetected(MakeDetection(path, sha256, name, source));
+            RaiseDetected(MakeDetection(path, sha256, name, source, confidence));
         }
 
         private void RaiseDetected(Detection detection)

@@ -13,7 +13,8 @@ The detection engine is shared one-for-one with the GUI project.
 
     dotnet build BYOVDMonitor.Service\Service.csproj -c Release
 
-Output: `BYOVDMonitor.Service\bin\Release\net48\BYOVDMonitorService.exe`.
+Output: `bin\BYOVDMonitorService.exe` (one solution-level `bin\`, set by
+`Directory.Build.props`).
 
 ## Install (on the target server, from an elevated prompt)
 
@@ -29,8 +30,10 @@ What `install` does:
   event log.
 - Writes a default `config.json` (if one isn't already there).
 - Registers the `BYOVDMonitor` service via `sc.exe`, start type
-  `auto`, identity `LocalSystem`. Failure action: restart after
-  60 seconds, three times.
+  `auto`, identity `LocalSystem`. Self-protection: failure action
+  restart after 60 seconds, with the failure counter reset after
+  60 seconds of uptime — so the service is restarted on **every** kill,
+  not just three times a day.
 - Starts the service.
 
 After install, edit `C:\ProgramData\BYOVDMonitor\config.json` (see
@@ -65,6 +68,8 @@ below) and restart:
   "RescanIntervalMinutes": 15,
   "FullRescanIntervalHours": 24,
   "MhrEnabled": false,
+  "DriverLoadWatchEnabled": true,
+  "SignatureCheckEnabled": true,
   "WebhookUrl": "https://siem.example.com/byovd"
 }
 ```
@@ -81,6 +86,15 @@ below) and restart:
 - `MhrEnabled` — extra per-file lookup of new files in Team Cymru MHR
   (DNS, no API key). Sends the file's SHA-1 to an external DNS server.
   Off by default.
+- `DriverLoadWatchEnabled` — watch the Windows event log (`Service
+  Control Manager` 7045 and, where audit is on, `4697`) for a new
+  kernel-mode driver service and hash its image against loldrivers.
+  Catches a vulnerable driver dropped **outside** the monitored
+  folders. On by default.
+- `SignatureCheckEnabled` — for an installed driver not matched by
+  loldrivers, flag a revoked / distrusted / untrusted-root / tampered /
+  missing Authenticode signature (`WinVerifyTrust`, revocation from the
+  local CRL cache only). Low-confidence heuristic. On by default.
 - `WebhookUrl` — destination for alert POSTs (`application/json`).
   Empty disables the webhook. Payload format:
 
@@ -92,9 +106,14 @@ below) and restart:
   "file": "C:\\inetpub\\evil.sys",
   "sha256": "77D89944...",
   "match": "Driver name from loldrivers",
+  "confidence": "High",
   "source": "loldrivers/sha256"
 }
 ```
+
+`confidence` — `High` (exact SHA-256 / Authentihash, or a known-bad
+driver install), `Medium` (MHR verdict), `Low` (Imphash-only match or
+signature heuristic).
 
 `source` values:
 
@@ -104,6 +123,11 @@ below) and restart:
 - `loldrivers/authentihash` — same signed body as a known vulnerable
   driver
 - `MHR` — file's SHA-1 is known to Team Cymru MHR
+- `driver-install/<match>` — the same match, but triggered by a driver
+  **install** event (7045/4697), i.e. the file was found via the newly
+  registered service rather than a monitored folder
+- `driver-install/signature` — installed driver with a suspicious
+  Authenticode signature (revoked / distrusted / unsigned / tampered)
 
 ## Windows event log
 
@@ -130,6 +154,8 @@ Recent alerts:
   conditional GET (ETag).
 - `baseline\*.json` — per-root-folder cache of clean files (so
   unchanged files aren't rehashed on every rescan).
+- `detections.jsonl` — append-only log of every detection (one JSON
+  record per line), alongside the Windows event log and webhook.
 
 `uninstall` does **not** wipe the data directory (to make repair
 re-installs easier). To remove it manually:

@@ -30,9 +30,27 @@ matches. Any of the three matches raises the alert.
 - Configurable list of monitored folders (with "include subfolders" option).
 - Real-time `FileSystemWatcher` plus startup and periodic full rescans.
 - Hash list from loldrivers.io is stored **locally** (`hashes.json`).
-  On first run the app offers to download it; once per hour it checks
-  for updates (conditional GET via ETag) and offers to refresh. Only
-  the update fetch goes over the network.
+  On first run the app offers to download it; **once per hour it
+  auto-downloads the latest list** (conditional GET via ETag — nothing
+  is fetched when the list is unchanged) and re-scans against it, no
+  prompt. The manual "Check for updates" button still asks before
+  refreshing. Only the update fetch goes over the network.
+- **Default monitored folders** on first run: `System32\drivers` and
+  the temp directory — the usual places a vulnerable driver shows up.
+  Edit the list any time.
+- **Driver-install watch** (event log 7045/4697): catches a
+  known-vulnerable driver registered as a service from *any* path,
+  even outside the monitored folders. Toggle in the window.
+- **Signature heuristic**: flags an installed driver whose Authenticode
+  signature is revoked / distrusted / untrusted-root / tampered /
+  missing (`WinVerifyTrust`, revocation from local CRL cache only).
+  Low-confidence, toggleable.
+- **Confidence** column on every detection: `High` (SHA-256 /
+  Authentihash / known-bad install), `Medium` (MHR), `Low` (Imphash
+  only, or signature heuristic).
+- **Persistent detection log** (`detections.jsonl`, one JSON record per
+  line): the live list survives restarts — the last 500 entries are
+  reloaded into the window on launch.
 - Per-folder baseline (local cache): SHA-256 of already-checked clean
   files is remembered, so unchanged files (same size + mtime) are
   skipped without rehashing on repeated scans and across restarts.
@@ -73,7 +91,8 @@ matches. Any of the three matches raises the alert.
 
     dotnet build BYOVDMonitor.csproj -c Release
 
-Output: `bin\Release\net48\BYOVDMonitor.exe`. You can also open the
+Output: `bin\BYOVDMonitor.exe` (all artifacts go to one solution-level
+`bin\`, set by `Directory.Build.props`). You can also open the
 `.csproj` in Visual Studio and build the usual way.
 
 ## Where the data lives
@@ -85,6 +104,8 @@ Output: `bin\Release\net48\BYOVDMonitor.exe`. You can also open the
   ETag for efficient update checks).
 - `baseline\*.json` — per-root-folder cache of clean files (hashes of
   files already verified, so they aren't rehashed next time).
+- `detections.jsonl` — append-only log of every detection (one JSON
+  record per line); reloaded into the window on launch.
 
 ## Sources
 

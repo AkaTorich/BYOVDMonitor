@@ -11,6 +11,14 @@ namespace BYOVDMonitor
         public string DriverName { get; set; }
         public string Source { get; set; }  // источник совпадения: "loldrivers" или "MHR"
 
+        // Уровень доверия к срабатыванию: "High" | "Medium" | "Low".
+        // High  — точное совпадение содержимого (SHA-256) или подписанного тела (Authentihash),
+        //         либо сам факт установки драйвера с таким содержимым.
+        // Medium — внешний вердикт (MHR), относящийся к хешу, но не к конкретному драйверу.
+        // Low   — эвристика: Imphash (отпечаток импортов часто общий у разных драйверов)
+        //         или подозрительное состояние подписи (отзыв/недоверие).
+        public string Confidence { get; set; }
+
         // Время в удобном для отображения виде.
         public string TimeText
         {
