@@ -42,6 +42,7 @@ namespace BYOVDMonitor
             _monitor = new MonitorService(_hashes, _config);
             _monitor.Detected += OnDetected;
             _monitor.Error += OnMonitorError;
+            _monitor.ScanStatus += OnScanStatus;
 
             DetectionsList.ItemsSource = _detections;
             FoldersList.ItemsSource = _folders;
@@ -316,6 +317,12 @@ namespace BYOVDMonitor
         private void OnMonitorError(string message)
         {
             StatusBarText.Text = message;
+        }
+
+        // Ход и завершение обхода (приходит из фонового потока через UI-контекст).
+        private void OnScanStatus(string message)
+        {
+            if (!_alertActive) StatusBarText.Text = message;
         }
 
         // Заполнение журнала прошлыми срабатываниями с диска — без тревоги и мигания лампы.

@@ -15,6 +15,7 @@ namespace BYOVDMonitor
         public bool FromWatcher;
         public string RootPath;
         public bool ForceRehash;  // при true игнорируем baseline и считаем хеши заново (глубокий обход)
+        public Action OnReached;  // маркер: когда воркер доходит до него, обход завершён (файла нет)
     }
 
     // Мониторинг настроенных папок: наблюдатель в реальном времени плюс обход существующих файлов.
@@ -49,6 +50,11 @@ namespace BYOVDMonitor
         // События вызываются в потоке пользовательского интерфейса.
         public event Action<Detection> Detected;
         public event Action<string> Error;
+        public event Action<string> ScanStatus;  // ход и завершение обхода (для строки состояния)
+
+        // Прогресс глубокого обхода.
+        private volatile bool _scanActive;
+        private long _scanProcessed;
 
         public MonitorService(HashListService hashes, AppConfig config)
         {
@@ -80,9 +86,11 @@ namespace BYOVDMonitor
             {
                 if (folder == null || string.IsNullOrEmpty(folder.Path)) continue;
                 _baseline.LoadRoot(folder.Path); // локальная база папки
-                ScanFolder(folder, false);       // обход существующих файлов (поверхностный)
                 AddWatcher(folder);              // отслеживание новых
             }
+
+            // Первичный обход существующих файлов — в фоне, чтобы не морозить интерфейс.
+            StartScan(false);
 
             // Наблюдение за установкой драйверов — независимо от списка папок.
             if (_config.DriverLoadWatchEnabled)
@@ -132,22 +140,62 @@ namespace BYOVDMonitor
         // Повторный обход всех папок (поверхностный — пропускает неизменённые файлы по baseline).
         public void Rescan()
         {
-            foreach (MonitoredFolder folder in _currentFolders)
-            {
-                if (folder == null || string.IsNullOrEmpty(folder.Path)) continue;
-                ScanFolder(folder, false);
-            }
+            StartScan(false);
         }
 
         // Глубокий обход — пересчитывает хеши ВСЕХ файлов, игнорируя baseline.
         // Закрывает дыру с подменой содержимого + восстановлением timestamps.
         public void FullRescan()
         {
-            foreach (MonitoredFolder folder in _currentFolders)
+            StartScan(true);
+        }
+
+        // Обход папок (перечисление файлов + постановка в очередь) в ФОНОВОМ потоке,
+        // чтобы не блокировать интерфейс на больших/рекурсивных деревьях (например, Temp).
+        // Для глубокого обхода (force) показываем прогресс и сообщение о завершении.
+        private void StartScan(bool force)
+        {
+            if (!_running) return;
+            List<MonitoredFolder> folders = _currentFolders;
+
+            var t = new Thread(() =>
             {
-                if (folder == null || string.IsNullOrEmpty(folder.Path)) continue;
-                ScanFolder(folder, true);
-            }
+                try
+                {
+                    if (force)
+                    {
+                        Interlocked.Exchange(ref _scanProcessed, 0);
+                        _scanActive = true;
+                        RaiseScanStatus("Full rescan: scanning files...");
+                    }
+
+                    foreach (MonitoredFolder folder in folders)
+                    {
+                        if (!_running) return;
+                        if (folder == null || string.IsNullOrEmpty(folder.Path)) continue;
+                        ScanFolder(folder, force);
+                    }
+
+                    if (force)
+                    {
+                        // Маркер в конце очереди: когда воркер до него дойдёт, все файлы этого обхода обработаны.
+                        Enqueue(null, false, null, false, () =>
+                        {
+                            _scanActive = false;
+                            RaiseScanStatus("Full rescan complete: "
+                                + Interlocked.Read(ref _scanProcessed) + " files checked");
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _scanActive = false;
+                    RaiseError("Scan failed: " + ex.Message);
+                }
+            });
+            t.IsBackground = true;
+            t.Name = "byovd-scan-enumerator";
+            t.Start();
         }
 
         // Ручная проверка одного файла: всегда проверяет (без учёта локальной базы).
@@ -226,7 +274,8 @@ namespace BYOVDMonitor
             RaiseError("Watcher error: " + e.GetException().Message);
         }
 
-        private void Enqueue(string path, bool fromWatcher, string rootPath, bool forceRehash = false)
+        private void Enqueue(string path, bool fromWatcher, string rootPath,
+                             bool forceRehash = false, Action onReached = null)
         {
             BlockingCollection<WorkItem> queue = _queue;
             if (queue == null) return;
@@ -237,7 +286,8 @@ namespace BYOVDMonitor
                     Path = path,
                     FromWatcher = fromWatcher,
                     RootPath = rootPath,
-                    ForceRehash = forceRehash
+                    ForceRehash = forceRehash,
+                    OnReached = onReached
                 });
             }
             catch { } // очередь закрыта при остановке
@@ -297,7 +347,23 @@ namespace BYOVDMonitor
                 foreach (WorkItem item in queue.GetConsumingEnumerable())
                 {
                     if (!_running) break;
+
+                    // Маркер завершения обхода — просто вызываем его колбэк.
+                    if (item.OnReached != null)
+                    {
+                        try { item.OnReached(); } catch { }
+                        continue;
+                    }
+
                     ProcessFile(item);
+
+                    // Прогресс глубокого обхода: сообщаем каждые 500 проверенных файлов.
+                    if (_scanActive)
+                    {
+                        long n = Interlocked.Increment(ref _scanProcessed);
+                        if (n % 500 == 0)
+                            RaiseScanStatus("Full rescan: " + n + " files checked...");
+                    }
                 }
             }
             catch (ObjectDisposedException) { }
@@ -589,6 +655,16 @@ namespace BYOVDMonitor
         private void RaiseError(string message)
         {
             Action<string> handler = Error;
+            if (handler == null) return;
+            if (_uiContext != null)
+                _uiContext.Post(state => handler(message), null);
+            else
+                handler(message);
+        }
+
+        private void RaiseScanStatus(string message)
+        {
+            Action<string> handler = ScanStatus;
             if (handler == null) return;
             if (_uiContext != null)
                 _uiContext.Post(state => handler(message), null);
